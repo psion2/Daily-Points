@@ -1,12 +1,15 @@
 import time
 import random
 import os
-from datetime import datetime, timedelta
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from seleniumbase import Driver
 from selenium.common.exceptions import TimeoutException, WebDriverException
+from dotenv import load_dotenv
+
+# Load environment variables from a .env file for local development
+load_dotenv()
 
 # --- Configuration ---
 BASE_URL = "https://www.clashchamps.com/i-need-a-base/"
@@ -32,26 +35,6 @@ ACCOUNTS = [
     {"username": os.getenv("ACCOUNT_19_USER"), "password": os.getenv("ACCOUNT_19_PASS")},
     {"username": os.getenv("ACCOUNT_20_USER"), "password": os.getenv("ACCOUNT_20_PASS")},
 ]
-
-# --- Scheduling Control ---
-LAST_RUN_FILE = "/tmp/last_run.txt"
-
-def should_run_now():
-    try:
-        with open(LAST_RUN_FILE, "r") as f:
-            last_run_str = f.read().strip()
-            last_run = datetime.fromisoformat(last_run_str)
-            if datetime.now() - last_run < timedelta(hours=25):
-                print("🕒 Skipping run — less than 25 hours since last execution.")
-                return False
-    except FileNotFoundError:
-        print("🆕 First run or last run file not found. Proceeding...")
-
-    # Update timestamp
-    with open(LAST_RUN_FILE, "w") as f:
-        f.write(datetime.now().isoformat())
-    print("✅ Running task now — 25+ hours since last run.")
-    return True
 
 # --- Functions ---
 def login(driver, username, password):
@@ -114,10 +97,10 @@ def download_first_base(driver):
             pass
 
         print("Download process initiated successfully.")
-        time.sleep(2)  # Reduced from 3s — enough for UI to respond
+        time.sleep(2)
         return True
 
-    except TimeoutException as e:
+    except TimeoutException:
         print("\n--- ERROR ---")
         print("Script timed out waiting for an element on the base page.")
         print("This usually means the page didn't load correctly or the element could not be found.")
@@ -173,9 +156,6 @@ def process_accounts():
 
 # --- Entry Point ---
 if __name__ == "__main__":
-    if should_run_now():
-        process_accounts()
-        # Optional: Add Discord/webhook notification here if desired
-        # send_discord_message("✅ ClashChamps automation completed successfully!")
-    else:
-        print("💤 Nothing to do. Waiting for next scheduled trigger.")
+    print("🚀 Script starting process...")
+    process_accounts()
+    print("✅ All accounts processed. Script finished.")
