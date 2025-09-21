@@ -1,10 +1,13 @@
 import time
+import random
+import os
+from datetime import datetime, timedelta
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from seleniumbase import Driver
 from selenium.common.exceptions import TimeoutException, WebDriverException
-import os
+
 # --- Configuration ---
 BASE_URL = "https://www.clashchamps.com/i-need-a-base/"
 ACCOUNTS = [
@@ -30,6 +33,25 @@ ACCOUNTS = [
     {"username": os.getenv("ACCOUNT_20_USER"), "password": os.getenv("ACCOUNT_20_PASS")},
 ]
 
+# --- Scheduling Control ---
+LAST_RUN_FILE = "/tmp/last_run.txt"
+
+def should_run_now():
+    try:
+        with open(LAST_RUN_FILE, "r") as f:
+            last_run_str = f.read().strip()
+            last_run = datetime.fromisoformat(last_run_str)
+            if datetime.now() - last_run < timedelta(hours=25):
+                print("🕒 Skipping run — less than 25 hours since last execution.")
+                return False
+    except FileNotFoundError:
+        print("🆕 First run or last run file not found. Proceeding...")
+
+    # Update timestamp
+    with open(LAST_RUN_FILE, "w") as f:
+        f.write(datetime.now().isoformat())
+    print("✅ Running task now — 25+ hours since last run.")
+    return True
 
 # --- Functions ---
 def login(driver, username, password):
@@ -37,14 +59,14 @@ def login(driver, username, password):
     print(f"Attempting to log in as {username}...")
     try:
         driver.uc_open_with_reconnect("https://www.clashchamps.com/my-account/", 4)
-        
+
         print("Page loaded. Entering credentials...")
         WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.ID, "username")))
         driver.find_element(By.ID, "username").send_keys(username)
         driver.find_element(By.ID, "password").send_keys(password)
         driver.find_element(By.NAME, "login").click()
-        
-        # NEW: Verify login by checking for the "My Account" menu item.
+
+        # Verify login by checking for the "My Account" menu item.
         print("Verifying login success...")
         WebDriverWait(driver, 20).until(
             EC.visibility_of_element_located((By.ID, "menu-item-3650"))
@@ -65,44 +87,40 @@ def download_first_base(driver):
     """Navigates to the base page and attempts to initiate a download."""
     print("\nNavigating to the base download page...")
     driver.get(BASE_URL)
-    
+
     try:
         print("Looking for the first 'DOWNLOAD' button...")
-        # Use a more specific selector to find the download link inside a base item
         download_button_selector = (By.CSS_SELECTOR, ".baseItem_footer .btn_primary")
-        
+
         download_button = WebDriverWait(driver, 20).until(
             EC.element_to_be_clickable(download_button_selector)
         )
         print("Found the DOWNLOAD button. Clicking it...")
-        # Sometimes a direct click doesn't work; JavaScript clicks are more reliable
         driver.execute_script("arguments[0].click();", download_button)
         print("Clicked the DOWNLOAD button via JavaScript.")
 
-        # Try to handle the pop-up, but don't fail if it doesn't appear.
+        # Handle optional pop-up
         try:
             print("Checking for the confirmation pop-up (will wait up to 5 seconds)...")
             ok_button_selector = (By.CSS_SELECTOR, "#modalSupport_Download button.wantSupport")
             ok_button = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable(ok_button_selector)
             )
-            
             print("Pop-up found! Clicking the 'Ok' button.")
             ok_button.click()
             print("Successfully clicked 'Ok' in the pop-up.")
-
         except TimeoutException:
             print("Pop-up did not appear. This is okay. Continuing...")
             pass
-        
+
         print("Download process initiated successfully.")
-        time.sleep(3) # A short pause after the action
+        time.sleep(2)  # Reduced from 3s — enough for UI to respond
         return True
 
     except TimeoutException as e:
         print("\n--- ERROR ---")
         print("Script timed out waiting for an element on the base page.")
-        print("This usually means the page didn't load correctly or the element (like the download button) could not be found.")
+        print("This usually means the page didn't load correctly or the element could not be found.")
         driver.save_screenshot("error_screenshot.png")
         print("A screenshot of the error has been saved as 'error_screenshot.png'")
         print("-------------\n")
@@ -118,37 +136,46 @@ def process_accounts():
     for account in ACCOUNTS:
         username = account["username"]
         password = account["password"]
-        
-        # Skip if credentials are missing
+
+        # Skip invalid accounts
         if not username or not password:
             print(f"⚠️ Skipping account - missing username or password in env vars.")
             continue
-        
+
         print("=" * 50)
         print(f"Processing account: {username}")
-            
+
         driver = None
         try:
-            driver = Driver(uc=True, headless=True) # headless=False lets you see the browser
-            if login(driver, account["username"], account["password"]):
+            driver = Driver(uc=True, headless=True)  # Keep headless for cloud
+            if login(driver, username, password):
                 if download_first_base(driver):
-                    print(f"\nTask completed for {account['username']}.")
+                    print(f"\n✅ Task completed for {username}.")
                 else:
-                    print(f"\nTask failed for {account['username']}.")
+                    print(f"\n❌ Task failed for {username}.")
             else:
-                 print(f"Could not proceed with task for {account['username']} due to login failure.")
+                print(f"🚫 Could not proceed with task for {username} due to login failure.")
 
         except (WebDriverException, ConnectionRefusedError) as e:
             print(f"A browser or connection error occurred: {e}")
-            print("Please ensure your internet connection is stable and no other browser instances are conflicting.")
+            print("Please ensure your internet connection is stable.")
         except Exception as e:
             print(f"A critical script error occurred: {e}")
         finally:
             if driver:
                 print("Closing the browser for this account.")
                 driver.quit()
-        
-        print("=" * 50)
 
+        # Add random delay before next account
+        delay = random.uniform(5, 12)
+        print(f"⏳ Waiting {delay:.1f} seconds before next account...\n")
+        time.sleep(delay)
+
+# --- Entry Point ---
 if __name__ == "__main__":
-    process_accounts()
+    if should_run_now():
+        process_accounts()
+        # Optional: Add Discord/webhook notification here if desired
+        # send_discord_message("✅ ClashChamps automation completed successfully!")
+    else:
+        print("💤 Nothing to do. Waiting for next scheduled trigger.")
